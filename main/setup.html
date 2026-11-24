@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wi-Fi setup · Hong Kong International Airport Flight Info</title>
+<style>
+  * { box-sizing: border-box }
+  [hidden] { display: none !important }
+  body { margin: 0; color: #20221e; background: #f6f5ef; font: 1rem/1.45 "Inter", system-ui, sans-serif }
+  header { background: #20221e; color: #fffdf4; border-bottom: 5px solid #f3c940 }
+  header div, main { max-width: 33rem; margin: auto; padding: 1rem 1.15rem }
+  header div { font-weight: 650 }
+  h1 { font-size: 1.9rem; line-height: 1.15; margin: .5rem 0 .4rem }
+  p { margin: .35rem 0 .9rem }
+  h2 { font-size: 1.1rem; margin: 0 }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: 1.25rem }
+  .sub, small { font-size: .88rem; color: #52564c }
+  button, input { font: inherit }
+  button { cursor: pointer }
+  .secondary { min-height: 44px; background: none; border: 1px solid #a5a89d; color: inherit; border-radius: .5rem; padding: .4rem .8rem }
+  #status { margin: .2rem 0 .6rem }
+  #networks { max-height: 19rem; overflow-y: auto; background: white; border: 1px solid #a7aa9f; border-radius: .65rem }
+  #networks:empty { display: none }
+  .network { display: flex; align-items: center; gap: .85rem; min-height: 3.4rem; padding: .55rem .8rem; cursor: pointer }
+  .network + .network { border-top: 1px solid #ddded5 }
+  .network:has(:checked) { background: #fff4c7; box-shadow: inset 4px 0 #b4890d }
+  .network:has(:disabled) { color: #5b5f54; cursor: default }
+  .network input { accent-color: #33372c; width: 1.1rem; height: 1.1rem; margin: 0; flex: none }
+  .network > span { min-width: 0 }
+  .network bdi { font-weight: 620; overflow-wrap: anywhere; white-space: pre-wrap }
+  .network small { display: block }
+  .signal { margin-inline-start: auto; width: 1.5rem; flex: none; height: 1.15rem; display: flex; align-items: end; gap: 2px; color: #494e43 }
+  .signal i { width: 5px; height: 40%; border: 1px solid currentColor }
+  .signal i:nth-child(2) { height: 65% }
+  .signal i:nth-child(3) { height: 90% }
+  .signal i.active { background: currentColor }
+  #passLabel { overflow-wrap: anywhere }
+  .link { border: 0; background: none; color: #333c29; min-height: 44px; text-decoration: underline; padding: .6rem 0 }
+  .field { display: block; font-weight: 620; margin: .65rem 0 .25rem }
+  .entry { width: 100%; padding: .7rem; background: white; color: inherit; border: 1px solid #8e9385; border-radius: .45rem }
+  .reveal { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; font-size: .9rem }
+  #save { width: 100%; padding: .8rem; border: 1px solid #36372e; border-radius: .5rem; font-weight: 650; background: #f3c940; color: #20221e; margin: .65rem 0 1rem }
+  #save:disabled { background: #e1e1d9; color: #686b61; border-color: #b5b7ac; cursor: default }
+  :focus-visible { outline: 3px solid #27639e; outline-offset: 2px }
+</style>
+<header><div>Hong Kong International Airport Flight Info</div></header>
+<main>
+  <h1>Wi-Fi setup</h1>
+  <p>Choose a nearby 2.4 GHz network for your NOTE4C.</p>
+  <section id="picker" aria-labelledby="nearby" hidden>
+    <div class="bar"><h2 id="nearby">Available networks</h2><button class="secondary" type="button" id="rescan">Scan again</button></div>
+    <p class="sub" id="status" role="status"></p>
+    <div id="networks" role="radiogroup" aria-labelledby="nearby"></div>
+    <button class="link" id="manual" type="button" aria-controls="manualFields">Enter a network name manually</button>
+  </section>
+  <form method="post" action="/save" id="setup">
+    <input type="hidden" name="ssid_hex" id="hex" disabled>
+    <div id="manualFields">
+      <label class="field" for="ssid">Network name</label>
+      <input class="entry" name="ssid" id="ssid" maxlength="32" required autocapitalize="none" spellcheck="false" autocomplete="off">
+    </div>
+    <div id="passwordFields">
+      <label class="field" id="passLabel" for="pass">Wi-Fi password</label>
+      <input class="entry" type="password" id="pass" name="pass" maxlength="63" autocomplete="off" aria-describedby="hint">
+      <small id="hint">Leave blank for an open network.</small>
+      <div id="showControl" hidden><label class="reveal"><input id="show" type="checkbox"> Show password</label></div>
+    </div>
+    <button id="save" type="submit">Save and restart</button>
+  </form>
+</main>
+<script>
+(() => {
+  if (!window.fetch || !window.TextDecoder || !window.TextEncoder) return;
+  const $ = id => document.getElementById(id);
+  const securityNames = {
+    open: 'Open', personal: 'Password required', enterprise: 'Enterprise · unsupported',
+    wep: 'WEP · unsupported', owe: 'Enhanced open · unsupported', other: 'Unsupported security'
+  };
+  const encoder = new TextEncoder();
+  let selection = null;
+  let manual = false;
+  let count = 0;
+  function networkName(hex) {
+    const bytes = Uint8Array.from(hex.match(/../g), pair => parseInt(pair, 16));
+    try { return new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes); }
+    catch { return Array.from(bytes, byte => byte >= 32 && byte < 127 ? String.fromCharCode(byte) : '\\x' + byte.toString(16).padStart(2, '0')).join(''); }
+  }
+  function clearPassword() {
+    $('pass').value = '';
+    $('pass').setCustomValidity('');
+    $('show').checked = false;
+    $('pass').type = 'password';
+  }
+  function updateForm() {
+    const needsPassword = selection && selection.security === 'personal';
+    $('hex').value = selection ? selection.ssid : '';
+    $('hex').disabled = !selection;
+    $('manualFields').hidden = !manual;
+    $('ssid').disabled = !manual;
+    $('passwordFields').hidden = !(manual || needsPassword);
+    $('pass').required = !!needsPassword;
+    $('passLabel').textContent = needsPassword ? 'Password for ' + networkName(selection.ssid) : 'Wi-Fi password';
+    $('hint').hidden = !manual;
+    $('save').disabled = !(manual || selection);
+    $('manual').setAttribute('aria-expanded', String(manual));
+  }
+  function select(record) {
+    if (manual || !selection || selection.key !== record.key) clearPassword();
+    manual = false;
+    selection = record;
+    updateForm();
+  }
+  function render(records) {
+    const choices = document.createDocumentFragment();
+    const seen = new Set();
+    for (const record of records) {
+      record.key = record.ssid + ':' + record.security;
+      seen.add(record.key);
+      const row = document.createElement('label');
+      row.className = 'network';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'network';
+      radio.disabled = !['open', 'personal'].includes(record.security);
+      radio.checked = !!selection && selection.key === record.key;
+      radio.onchange = () => select(record);
+      const text = document.createElement('span');
+      const name = document.createElement('bdi');
+      name.textContent = networkName(record.ssid);
+      const detail = document.createElement('small');
+      const bars = record.rssi >= -60 ? 3 : record.rssi >= -75 ? 2 : 1;
+      const signal = ['Weak signal', 'Fair signal', 'Strong signal'][bars - 1];
+      detail.textContent = securityNames[record.security];
+      const meter = document.createElement('span');
+      meter.className = 'signal';
+      meter.setAttribute('role', 'img');
+      meter.setAttribute('aria-label', signal);
+      meter.title = signal;
+      for (let i = 0; i < 3; i++) {
+        const bar = document.createElement('i');
+        if (i < bars) bar.className = 'active';
+        meter.append(bar);
+      }
+      text.append(name, detail);
+      row.append(radio, text, meter);
+      choices.append(row);
+    }
+    const lost = selection && !seen.has(selection.key);
+    if (lost) { selection = null; clearPassword(); }
+    $('networks').replaceChildren(choices);
+    count = seen.size;
+    const summary = count ? count + (count === 1 ? ' network found.' : ' networks found.') + ' Strongest first.'
+                          : 'No networks found. Scan again or enter a name manually.';
+    $('status').textContent = lost ? 'Your selected network is out of range. ' + summary : summary;
+    updateForm();
+  }
+  async function scan() {
+    $('rescan').disabled = true;
+    $('networks').setAttribute('aria-busy', 'true');
+    $('status').textContent = 'Searching for nearby networks…';
+    try {
+      const response = await fetch('/networks', {cache: 'no-store'});
+      if (!response.ok) throw new Error();
+      render(await response.json());
+    } catch {
+      $('status').textContent = count ? 'Scan failed. The previous list is still available.'
+                                      : 'Scan failed. Scan again or enter a name manually.';
+    } finally {
+      $('networks').setAttribute('aria-busy', 'false');
+      $('rescan').disabled = false;
+    }
+  }
+  $('manual').onclick = () => {
+    if (!manual) clearPassword();
+    manual = true;
+    selection = null;
+    const checked = $('networks').querySelector(':checked');
+    if (checked) checked.checked = false;
+    updateForm();
+    $('ssid').focus();
+  };
+  $('show').onchange = () => { $('pass').type = $('show').checked ? 'text' : 'password'; };
+  $('setup').onsubmit = event => {
+    const passwordBytes = encoder.encode($('pass').value).length;
+    $('ssid').setCustomValidity(manual && encoder.encode($('ssid').value).length > 32 ? 'Use a network name of 32 bytes or fewer.' : '');
+    $('pass').setCustomValidity(passwordBytes && (passwordBytes < 8 || passwordBytes > 63) ? 'Use a password of 8 to 63 bytes.' : '');
+    if (!$('setup').reportValidity()) event.preventDefault();
+  };
+  for (const id of ['ssid', 'pass']) $(id).oninput = () => $(id).setCustomValidity('');
+  $('rescan').onclick = scan;
+  $('picker').hidden = false;
+  $('showControl').hidden = false;
+  updateForm();
+  scan();
+})();
+</script>
+</html>
