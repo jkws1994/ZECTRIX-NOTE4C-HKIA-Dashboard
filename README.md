@@ -1,5 +1,7 @@
 # Hong Kong International Airport Flight Info
 
+**Beta firmware for the ZECTRIX NOTE4C.** The ESP32-S3 build, dashboard layouts and simulated controls have passed software tests. Physical display, Wi-Fi onboarding and battery operation still need verification on the kit. Back up your current firmware before installing.
+
 The ZECTRIX NOTE4C shows four pages on its 400 × 300 four-color display. After Wi-Fi setup, it starts on **Pax Dep**. Press **Down** for the next page or **Up** for the previous page. The sequence wraps in either direction. The yellow tab marks the current page. All observation and flight times use Hong Kong time (UTC+8).
 
 | Page | Information |
